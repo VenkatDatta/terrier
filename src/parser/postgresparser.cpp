@@ -16,6 +16,7 @@
 #include "parser/expression/case_expression.h"
 #include "parser/expression/column_value_expression.h"
 #include "parser/expression/comparison_expression.h"
+#include "parser/expression/concat_expression.h"
 #include "parser/expression/conjunction_expression.h"
 #include "parser/expression/constant_value_expression.h"
 #include "parser/expression/default_value_expression.h"
@@ -420,7 +421,6 @@ std::unique_ptr<AbstractExpression> PostgresParser::AExprTransform(ParseResult *
     case ExpressionType::OPERATOR_MINUS:
     case ExpressionType::OPERATOR_MULTIPLY:
     case ExpressionType::OPERATOR_DIVIDE:
-    case ExpressionType::OPERATOR_CONCAT:
     case ExpressionType::OPERATOR_MOD:
     case ExpressionType::OPERATOR_NOT:
     case ExpressionType::OPERATOR_IS_NULL:
@@ -442,6 +442,9 @@ std::unique_ptr<AbstractExpression> PostgresParser::AExprTransform(ParseResult *
     case ExpressionType::COMPARE_IN:
     case ExpressionType::COMPARE_IS_DISTINCT_FROM: {
       return std::make_unique<ComparisonExpression>(target_type, std::move(children));
+    }
+    case ExpressionType::OPERATOR_CONCAT: {
+      return std::make_unique<ConcatExpression>(target_type, std::move(children));
     }
     default: {
       PARSER_LOG_DEBUG("AExprTransform: type {} unsupported", static_cast<int>(target_type));
@@ -708,8 +711,17 @@ std::unique_ptr<AbstractExpression> PostgresParser::ValueTransform(ParseResult *
     }
 
     case T_Float: {
-      auto v = type::TransientValueFactory::GetDecimal(std::stod(val.val_.str_));
-      result = std::make_unique<ConstantValueExpression>(std::move(v));
+      // Per Postgres, T_Float just means that the string looks like a number.
+      // T_Float is also used for oversized ints, e.g. BIGINT.
+      // For this reason, a quick hack...
+      // TODO(WAN): figure out how Postgres does it once we care about floating point
+      if (std::strchr(val.val_.str_, '.') == nullptr) {
+        auto v = type::TransientValueFactory::GetBigInt(std::stol(val.val_.str_));
+        result = std::make_unique<ConstantValueExpression>(std::move(v));
+      } else {
+        auto v = type::TransientValueFactory::GetDecimal(std::stod(val.val_.str_));
+        result = std::make_unique<ConstantValueExpression>(std::move(v));
+      }
       break;
     }
 
